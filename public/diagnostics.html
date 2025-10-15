@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hand Tracking Diagnostics</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 20px;
+      background: #1a1a1a;
+      color: #fff;
+    }
+    .test-section {
+      background: #2a2a2a;
+      padding: 20px;
+      margin: 20px 0;
+      border-radius: 8px;
+      border: 1px solid #444;
+    }
+    .status {
+      padding: 10px;
+      margin: 10px 0;
+      border-radius: 4px;
+      font-weight: bold;
+    }
+    .success { background: #2d5016; color: #90ee90; }
+    .error { background: #5a1616; color: #ffb3b3; }
+    .warning { background: #5a4a16; color: #ffe066; }
+    button {
+      background: #646cff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin: 5px;
+    }
+    button:hover { background: #535bf2; }
+    video {
+      max-width: 100%;
+      border: 2px solid #444;
+      border-radius: 8px;
+      margin: 10px 0;
+    }
+    code {
+      background: #1a1a1a;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 0.9em;
+    }
+  </style>
+</head>
+<body>
+  <h1>🔍 Hand Tracking Diagnostics</h1>
+  <p>This page helps diagnose issues with the hand tracking application.</p>
+
+  <div class="test-section">
+    <h2>1. Camera Access Test</h2>
+    <button onclick="testCamera()">Test Camera</button>
+    <div id="cameraStatus"></div>
+    <video id="testVideo" autoplay playsinline muted style="display:none"></video>
+  </div>
+
+  <div class="test-section">
+    <h2>2. WebGL Support Test</h2>
+    <button onclick="testWebGL()">Test WebGL</button>
+    <div id="webglStatus"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>3. TensorFlow.js Test</h2>
+    <button onclick="testTensorFlow()">Test TensorFlow.js</button>
+    <div id="tfStatus"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>4. Hand Detection Model Test</h2>
+    <button onclick="testHandModel()">Test Hand Model</button>
+    <div id="modelStatus"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>5. Browser Information</h2>
+    <div id="browserInfo"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/hand-pose-detection@2.0.1"></script>
+  
+  <script>
+    // Show browser info immediately
+    document.getElementById('browserInfo').innerHTML = `
+      <div><strong>User Agent:</strong> ${navigator.userAgent}</div>
+      <div><strong>Platform:</strong> ${navigator.platform}</div>
+      <div><strong>Language:</strong> ${navigator.language}</div>
+      <div><strong>Hardware Concurrency:</strong> ${navigator.hardwareConcurrency} cores</div>
+      <div><strong>Device Memory:</strong> ${navigator.deviceMemory || 'Unknown'} GB</div>
+    `;
+
+    async function testCamera() {
+      const status = document.getElementById('cameraStatus');
+      const video = document.getElementById('testVideo');
+      
+      try {
+        status.innerHTML = '<div class="warning">⏳ Requesting camera access...</div>';
+        
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 640, height: 480 }
+        });
+        
+        video.srcObject = stream;
+        video.style.display = 'block';
+        
+        status.innerHTML = '<div class="success">✅ Camera access granted and working!</div>';
+      } catch (err) {
+        status.innerHTML = `<div class="error">❌ Camera Error: ${err.message}</div>`;
+        console.error(err);
+      }
+    }
+
+    async function testWebGL() {
+      const status = document.getElementById('webglStatus');
+      
+      try {
+        const canvas = document.createElement('canvas');
+        const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+        
+        if (!gl) {
+          status.innerHTML = '<div class="error">❌ WebGL not supported!</div>';
+          return;
+        }
+        
+        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+        const vendor = debugInfo ? gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) : 'Unknown';
+        const renderer = debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : 'Unknown';
+        
+        status.innerHTML = `
+          <div class="success">✅ WebGL is supported!</div>
+          <div><strong>Version:</strong> ${gl.getParameter(gl.VERSION)}</div>
+          <div><strong>Vendor:</strong> ${vendor}</div>
+          <div><strong>Renderer:</strong> ${renderer}</div>
+          <div><strong>Max Texture Size:</strong> ${gl.getParameter(gl.MAX_TEXTURE_SIZE)}</div>
+        `;
+      } catch (err) {
+        status.innerHTML = `<div class="error">❌ WebGL Error: ${err.message}</div>`;
+        console.error(err);
+      }
+    }
+
+    async function testTensorFlow() {
+      const status = document.getElementById('tfStatus');
+      
+      try {
+        status.innerHTML = '<div class="warning">⏳ Loading TensorFlow.js...</div>';
+        
+        await tf.ready();
+        
+        const backend = tf.getBackend();
+        const testTensor = tf.tensor([1, 2, 3, 4]);
+        const result = testTensor.square();
+        
+        status.innerHTML = `
+          <div class="success">✅ TensorFlow.js loaded successfully!</div>
+          <div><strong>Version:</strong> ${tf.version.tfjs}</div>
+          <div><strong>Backend:</strong> ${backend}</div>
+          <div><strong>Test Operation:</strong> [1,2,3,4]² = [${await result.array()}]</div>
+        `;
+        
+        testTensor.dispose();
+        result.dispose();
+      } catch (err) {
+        status.innerHTML = `<div class="error">❌ TensorFlow Error: ${err.message}</div>`;
+        console.error(err);
+      }
+    }
+
+    async function testHandModel() {
+      const status = document.getElementById('modelStatus');
+      
+      try {
+        status.innerHTML = '<div class="warning">⏳ Loading hand detection model (this may take 10-30 seconds)...</div>';
+        
+        await tf.ready();
+        
+        const model = handPoseDetection.SupportedModels.MediaPipeHands;
+        const detector = await handPoseDetection.createDetector(model, {
+          runtime: 'tfjs',
+          modelType: 'lite',
+          maxHands: 2
+        });
+        
+        status.innerHTML = '<div class="success">✅ Hand detection model loaded successfully!</div>';
+        
+        // Clean up
+        detector.dispose();
+      } catch (err) {
+        status.innerHTML = `
+          <div class="error">❌ Model Loading Error: ${err.message}</div>
+          <div style="margin-top: 10px; font-size: 0.9em;">
+            <strong>Common causes:</strong>
+            <ul>
+              <li>Slow internet connection</li>
+              <li>Network firewall blocking model download</li>
+              <li>Browser compatibility issues</li>
+              <li>Insufficient memory</li>
+            </ul>
+            <strong>Try:</strong>
+            <ul>
+              <li>Refresh the page</li>
+              <li>Check your internet connection</li>
+              <li>Try a different browser (Chrome recommended)</li>
+              <li>Close other browser tabs</li>
+            </ul>
+          </div>
+        `;
+        console.error(err);
+      }
+    }
+  </script>
+</body>
+</html>
