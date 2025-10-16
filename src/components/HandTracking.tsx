@@ -33,17 +33,19 @@ const HandTracking: React.FC<HandTrackingProps> = ({
   const [handsDetected, setHandsDetected] = useState(0);
   const [showDebug, setShowDebug] = useState(false);
   const [ringPositions, setRingPositions] = useState<RingPosition[]>([]);
+  const [velocity, setVelocity] = useState(0);
+  const [currentAlpha, setCurrentAlpha] = useState(0.8);
   const animationFrameRef = useRef<number | null>(null);
   const lastFrameTimeRef = useRef<number>(0);
   
   // Exponential smoothing filters for each hand (much faster response than Kalman)
   const smoothingFiltersRef = useRef<Map<string, ExponentialSmoothing3D>>(new Map());
   
-  // Get or create smoothing filter for a hand
+  // Get or create direct position tracker for a hand
   const getSmoothingFilter = (handedness: string): ExponentialSmoothing3D => {
     if (!smoothingFiltersRef.current.has(handedness)) {
-      // alpha=0.8 means 80% new value, 20% old value = very responsive
-      smoothingFiltersRef.current.set(handedness, new ExponentialSmoothing3D(0.8));
+      // Direct tracking - NO delay, only micro-smoothing when still
+      smoothingFiltersRef.current.set(handedness, new ExponentialSmoothing3D());
     }
     return smoothingFiltersRef.current.get(handedness)!;
   };
@@ -61,12 +63,14 @@ const HandTracking: React.FC<HandTrackingProps> = ({
         console.log('TensorFlow.js ready with backend:', tf.getBackend());
         setLoadingMessage('Loading hand detection model...');
         
-        // Use TensorFlow.js runtime instead of MediaPipe for better compatibility
+        // Use TensorFlow.js runtime with optimized settings for low latency
         const model = handPoseDetection.SupportedModels.MediaPipeHands;
         const detectorConfig: handPoseDetection.MediaPipeHandsMediaPipeModelConfig = {
           runtime: 'tfjs',
-          modelType: 'full',
+          modelType: 'lite', // Use 'lite' instead of 'full' for faster inference
           maxHands: 2,
+          detectorModelUrl: undefined,
+          landmarkModelUrl: undefined,
         };
         
         console.log('Loading hand detection model...');
@@ -146,24 +150,31 @@ const HandTracking: React.FC<HandTrackingProps> = ({
 
   // Calculate ring position between keypoints 13 and 14 (ring finger) with smoothing
   const calculateRingPositions = (hands: handPoseDetection.Hand[]): RingPosition[] => {
-    return hands.map(hand => {
+    return hands.map((hand, index) => {
       // Keypoint 13: Ring finger MCP (base)
       // Keypoint 14: Ring finger PIP (first joint)
       const kp13 = hand.keypoints[13];
       const kp14 = hand.keypoints[14];
       
-      // Position ring much closer to keypoint 14 (80% toward kp14, 20% from kp13)
-      const ringX = kp13.x * 0.2 + kp14.x * 0.82;
-      const ringY = kp13.y * 0.2 + kp14.y * 0.82;
-      const ringZ = (kp13.z || 0) * 0.2 + (kp14.z || 0) * 0.82;
+      // Position ring at the midpoint between 13 and 14 for better accuracy
+      // This ensures ring stays centered on the finger even during movement
+      const ringX = (kp13.x + kp14.x) / 2;
+      const ringY = (kp13.y + kp14.y) / 2;
+      const ringZ = ((kp13.z || 0) + (kp14.z || 0)) / 2;
       
       // Calculate rotation based on finger angle
       const angle = Math.atan2(kp14.y - kp13.y, kp14.x - kp13.x);
       
-      // Apply exponential smoothing - much faster response than Kalman filter
+      // Apply direct tracking with teleportation
       const handedness = hand.handedness as 'Left' | 'Right';
       const filter = getSmoothingFilter(handedness);
       const smoothed = filter.filter(ringX, ringY, ringZ, angle);
+      
+      // Update velocity and alpha stats for the first hand (for display)
+      if (index === 0) {
+        setVelocity(Math.round(filter.getVelocity()));
+        setCurrentAlpha(Number(filter.getCurrentAlpha().toFixed(2)));
+      }
       
       return {
         x: smoothed.x,
@@ -476,9 +487,26 @@ const HandTracking: React.FC<HandTrackingProps> = ({
           padding: '5px 10px',
           borderRadius: '4px',
           fontSize: '14px',
+          fontFamily: 'monospace',
         }}>
           <div>FPS: {fps}</div>
           <div>Hands: {handsDetected}</div>
+          {handsDetected > 0 && (
+            <>
+              <div style={{ marginTop: '4px', borderTop: '1px solid #555', paddingTop: '4px' }}>
+                <div style={{ fontSize: '11px', color: '#4ECDC4' }}>
+                  Velocity: {velocity} px/s
+                </div>
+                <div style={{ 
+                  fontSize: '11px', 
+                  color: currentAlpha === 2.0 ? '#FF00FF' : currentAlpha === 1.0 ? '#00FF00' : '#FFD700',
+                  fontWeight: currentAlpha === 2.0 ? 'bold' : 'normal'
+                }}>
+                  Mode: {currentAlpha === 2.0 ? '⚡ TELEPORT' : currentAlpha === 1.0 ? 'DIRECT 🚀' : 'STABILIZED'}
+                </div>
+              </div>
+            </>
+          )}
           <div style={{ fontSize: '10px', marginTop: '2px' }}>
             {cameraReady ? '🟢 Camera Ready' : '🟡 Waiting...'}
           </div>
