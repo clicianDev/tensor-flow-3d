@@ -2,9 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import * as handPoseDetection from '@tensorflow-models/hand-pose-detection';
 import * as tf from '@tensorflow/tfjs';
 import '@tensorflow/tfjs-backend-webgl';
-import { Canvas } from '@react-three/fiber';
-import { OrbitControls } from '@react-three/drei';
-import Ring3D from './Ring3D';
+import RingScene3D from './RingScene3D';
+import { ExponentialSmoothing3D } from '../utils/kalmanFilter';
 
 interface HandTrackingProps {
   width?: number;
@@ -36,6 +35,18 @@ const HandTracking: React.FC<HandTrackingProps> = ({
   const [ringPositions, setRingPositions] = useState<RingPosition[]>([]);
   const animationFrameRef = useRef<number | null>(null);
   const lastFrameTimeRef = useRef<number>(0);
+  
+  // Exponential smoothing filters for each hand (much faster response than Kalman)
+  const smoothingFiltersRef = useRef<Map<string, ExponentialSmoothing3D>>(new Map());
+  
+  // Get or create smoothing filter for a hand
+  const getSmoothingFilter = (handedness: string): ExponentialSmoothing3D => {
+    if (!smoothingFiltersRef.current.has(handedness)) {
+      // alpha=0.8 means 80% new value, 20% old value = very responsive
+      smoothingFiltersRef.current.set(handedness, new ExponentialSmoothing3D(0.8));
+    }
+    return smoothingFiltersRef.current.get(handedness)!;
+  };
 
   // Initialize hand detector
   useEffect(() => {
@@ -133,7 +144,7 @@ const HandTracking: React.FC<HandTrackingProps> = ({
     };
   }, [width, height]);
 
-  // Calculate ring position between keypoints 13 and 14 (ring finger)
+  // Calculate ring position between keypoints 13 and 14 (ring finger) with smoothing
   const calculateRingPositions = (hands: handPoseDetection.Hand[]): RingPosition[] => {
     return hands.map(hand => {
       // Keypoint 13: Ring finger MCP (base)
@@ -141,20 +152,25 @@ const HandTracking: React.FC<HandTrackingProps> = ({
       const kp13 = hand.keypoints[13];
       const kp14 = hand.keypoints[14];
       
-      // Position ring between these two points (closer to base for better fit)
-      const ringX = (kp13.x * 2 + kp14.x) / 3;
-      const ringY = (kp13.y * 2 + kp14.y) / 3;
-      const ringZ = ((kp13.z || 0) * 2 + (kp14.z || 0)) / 3;
+      // Position ring much closer to keypoint 14 (80% toward kp14, 20% from kp13)
+      const ringX = kp13.x * 0.2 + kp14.x * 0.82;
+      const ringY = kp13.y * 0.2 + kp14.y * 0.82;
+      const ringZ = (kp13.z || 0) * 0.2 + (kp14.z || 0) * 0.82;
       
       // Calculate rotation based on finger angle
       const angle = Math.atan2(kp14.y - kp13.y, kp14.x - kp13.x);
       
+      // Apply exponential smoothing - much faster response than Kalman filter
+      const handedness = hand.handedness as 'Left' | 'Right';
+      const filter = getSmoothingFilter(handedness);
+      const smoothed = filter.filter(ringX, ringY, ringZ, angle);
+      
       return {
-        x: ringX,
-        y: ringY,
-        z: ringZ,
-        rotation: angle,
-        handedness: hand.handedness as 'Left' | 'Right'
+        x: smoothed.x,
+        y: smoothed.y,
+        z: smoothed.z,
+        rotation: smoothed.rotation,
+        handedness: handedness
       };
     });
   };
@@ -443,38 +459,11 @@ const HandTracking: React.FC<HandTrackingProps> = ({
             height: '100%',
             pointerEvents: 'none'
           }}>
-            <Canvas
-              style={{ 
-                width: '100%', 
-                height: '100%',
-                borderRadius: '8px'
-              }}
-              camera={{ position: [0, 0, 2], fov: 50 }}
-            >
-              <ambientLight intensity={0.5} />
-              <pointLight position={[10, 10, 10]} intensity={1} />
-              <pointLight position={[-10, -10, -10]} intensity={0.5} />
-              
-              {ringPositions.map((pos, index) => {
-                // Convert canvas coordinates to 3D space
-                // Account for mirrored video: flip X coordinate
-                const x3D = -((pos.x / width) * 2 - 1); // Flip X for mirrored video
-                const y3D = -((pos.y / height) * 2 - 1); // Invert Y (canvas top=0, 3D top=1)
-                const z3D = (pos.z || 0) * -0.01; // Depth
-                
-                return (
-                  <Ring3D
-                    key={index}
-                    position={[x3D, y3D, z3D]}
-                    rotation={[0, 0, -pos.rotation]} // Flip rotation for mirror
-                    scale={2.5}
-                    color={pos.handedness === 'Left' ? '#FFD700' : '#FFA500'}
-                  />
-                );
-              })}
-              
-              <OrbitControls enableZoom={false} enablePan={false} enabled={false} />
-            </Canvas>
+            <RingScene3D 
+              ringPositions={ringPositions} 
+              width={width} 
+              height={height} 
+            />
           </div>
         )}
         
