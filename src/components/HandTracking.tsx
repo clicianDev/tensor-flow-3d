@@ -162,8 +162,8 @@ const HandTracking: React.FC<HandTrackingProps> = ({
       const ringY = (kp13.y + kp14.y) / 2;
       const ringZ = ((kp13.z || 0) + (kp14.z || 0)) / 2;
       
-      // Calculate rotation based on finger angle
-      const angle = Math.atan2(kp14.y - kp13.y, kp14.x - kp13.x);
+      // Fixed rotation - do not calculate angle from finger
+      const angle = 0; // Keep rotation fixed
       
       // Apply direct tracking with teleportation
       const handedness = hand.handedness as 'Left' | 'Right';
@@ -180,7 +180,7 @@ const HandTracking: React.FC<HandTrackingProps> = ({
         x: smoothed.x,
         y: smoothed.y,
         z: smoothed.z,
-        rotation: smoothed.rotation,
+        rotation: 0, // Fixed rotation, not affected by hand movement
         handedness: handedness
       };
     });
